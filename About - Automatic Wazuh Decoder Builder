@@ -1,0 +1,195 @@
+# Mariskarthick's Advanced Wazuh Decoder Builder
+
+An enterprise-grade, automated, and UI-powered decoder builder for Wazuh.
+This tool supports:
+- GROK-to-PCRE2 conversion
+- Hybrid GROK + Tag-based multi-layered decoder generation
+- Manual regex-based decoding
+- PCRE2 and spacing-aware regex detection
+- Offset handling
+- Decoder chaining with `<parent>`, `<order>`, `<prematch>` logic
+
+Built by: **Mariskarthick M**  
+🔗 [LinkedIn](https://www.linkedin.com/in/mariskarthickm)  
+🌐 [mariskarthick.in](https://mariskarthick.in)
+
+---
+
+## ✨ Features at a Glance
+
+| Feature                     | Description |
+|----------------------------|-------------|
+| **GROK Support**           | Supports pure GROK and hybrid GROK+tags |
+| **Manual Mode**            | Allows full control over regex, prematch, offsets, etc. |
+| **Spacing Detection**      | Handles `action:   accept`, `key=val`, `field: val` formats |
+| **Offset Support**         | Enables setting regex field start offset |
+| **Multi-layered Decoders** | Automatically handles `<parent>` and `<order>` references |
+| **PCRE2 Regex**            | Regex generation is compliant with Wazuh's `<regex pcre2="yes">` rules |
+| **Raw `<prematch>`**       | Ensures `<prematch>` uses raw log string, not encoded quotes |
+
+---
+
+## 🚀 Getting Started
+
+### Clone and Run Locally
+```bash
+git clone https://github.com/yourusername/advanced-wazuh-decoder-builder.git
+cd advanced-wazuh-decoder-builder
+pip install flask
+python3 advanced_app.py
+```
+Visit `http://localhost:5000` in your browser.
+
+---
+
+## 🌐 Modes of Operation
+
+### 1. GROK Mode (Pure)
+- Enable **GROK Mode**
+- Paste your log in the top textarea
+- Add GROK pattern (e.g.):
+
+```grok
+%{SYSLOGTIMESTAMP:timestamp} %{IP:src_ip} %{NUMBER:session_id}|%{WORD:vendor}|%{DATA:firewall_model}|%{DATA:version}|%{NUMBER:event_id}|%{DATA:message}|%{NUMBER:severity}|start=%{DATE_DMY:start_date} %{TIME:start_time} logver=%{NUMBER:logver} deviceExternalId=%{WORD:deviceExternalId}
+```
+
+- Optionally, add a `prematch` row:
+```xml
+<prematch>Jan 24 11:01:28</prematch>
+```
+
+- **Output**:
+```xml
+<decoder name="grok_decoder">
+  <prematch>Jan 24 11:01:28</prematch>
+  <regex pcre2="yes">...</regex>
+  <order>timestamp,src_ip,...</order>
+</decoder>
+```
+
+---
+
+### 2. GROK Hybrid Mode
+- Enable **GROK Mode**
+- Paste a GROK pattern (as above)
+- Add **manual tag rows**:
+  - `tag = prematch`, `sample = Jan 24 11:01:28`
+  - `tag = regex`, `fieldName = logver=`, `sample = 702041396`, `mapping = logver`
+  - `tag = regex`, `fieldName = deviceExternalId=`, `sample = FG3H0E393939w2924823`
+
+- **Output** (multi-layered):
+```xml
+<decoder name="grok_decoder">
+  <prematch>Jan 24 11:01:28</prematch>
+</decoder>
+<decoder name="grok_decoder_child1">
+  <parent>grok_decoder</parent>
+  <regex pcre2="yes">logver=(?P<logver>\d+)</regex>
+  <order>logver</order>
+</decoder>
+```
+
+---
+
+### 3. Manual Mode (Regex Mode - GROK OFF)
+- GROK Mode is **off**
+- Paste raw log:
+```text
+Jan 24 11:01:28 5.195.107.202 0|Fortinet|FortiGate-300E|... logver=702041396 deviceExternalId=FG3H0E393939w2924823
+```
+- Add rows:
+  - `tag = prematch`, `sample = Jan 24 11:01:28`
+  - `tag = regex`, `fieldName = logver=`, `sample = 702041396`, `mapping = logver`
+  - `tag = regex`, `fieldName = deviceExternalId=`, `sample = FG3H0E393939w2924823`
+  - `tag = regex`, `fieldName = action:`, `sample = accept`, `mapping = action`
+
+- **Spacing is auto detected** for `:`, `=`, and multiple whitespaces
+
+- **Output**:
+```xml
+<decoder name="my_decoder">
+  <prematch>Jan 24 11:01:28</prematch>
+  <regex>logver=(?P<logver>\S+)</regex>
+  <regex>deviceExternalId=(?P<deviceExternalId>\S+)</regex>
+  <regex>action:\s+(?P<action>accept)</regex>
+  <order>logver,deviceExternalId,action</order>
+</decoder>
+```
+
+---
+
+### 4. Multi-layered Manual Decoder
+- Use **different decoderName** per row
+- Add `parent` tags to chain decoders
+- Use `offset` if applicable
+
+```xml
+<decoder name="root_decoder">
+  <prematch>Jun 13 18:19:48</prematch>
+</decoder>
+<decoder name="child_decoder1">
+  <parent>root_decoder</parent>
+  <regex>logver=(?P<logver>\d+)</regex>
+  <order>logver</order>
+</decoder>
+```
+
+---
+
+## 📊 Complex Log Example
+
+**Sample**:
+```text
+Jun 13 18:19:48 10-4-29-125... logver=702071577 deviceExternalId=FG101wdwdw23438 dvchost=shadow-HOST ad.vd=root ... duser=mariskarthickm@FortiManager ...
+```
+
+**Mappings**:
+| Field Name         | Sample Value                        | Custom Mapping |
+|--------------------|--------------------------------------|----------------|
+| `logver=`          | `702071577`                          | `logver`       |
+| `deviceExternalId=`| `FG101wdwdw23438`                    | `deviceExternalId` |
+| `dvchost=`         | `shadow-HOST`                        | `dvchost`      |
+| `ad.vd=`           | `root`                               | `ad.vd`        |
+| `duser=`           | `mariskarthick@FortiManager`         | `duser`        |
+
+---
+
+## 🧱 Developer Notes
+
+- Regex patterns are **auto-escaped**
+- GROK patterns are **converted** to Wazuh-supported PCRE2
+- Prematch is **not HTML escaped** (e.g., `"` is not used)
+- Use `offset` field if matching starts mid-line
+- Use `customMapping` to override fieldName in output `<order>`
+
+---
+
+## 🚪 Limitations
+- GROK pattern must follow `%{TYPE:field}` format
+- Only basic offset detection (not position-based regex backtracking)
+
+---
+
+## 🎓 Credits
+Built by **Mariskarthick** to streamline enterprise Wazuh parsing use cases for:
+- FortiGate, Check Point, Zscaler
+- Sysmon, Windows Logs, JSON
+- Generic Key-Value log formats
+
+---
+
+## 🚜 Contributing
+Pull requests are welcome for:
+- New GROK patterns
+- UI Enhancements (ReactJS support planned)
+- Log samples for real-world decoders
+
+---
+
+## 🌍 License
+MIT License - Use this in your SOC, lab, MSSP environment, or integrate into your own decoder engine.
+
+---
+
+Need help mapping a complex log source? Raise an issue or connect via LinkedIn!
+
